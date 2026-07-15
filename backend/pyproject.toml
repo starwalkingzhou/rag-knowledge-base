@@ -1,0 +1,15 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic-settings>=2.14.2",
+    "asyncpg>=0.31.0",
+    "sqlalchemy[asyncio]>=2.0.51",
+    "alembic>=1.18.5",
+    "cos-python-sdk-v5>=1.9.44",
+    "fastapi>=0.139.0",
+    "uvicorn[standard]>=0.51.0",
+]
