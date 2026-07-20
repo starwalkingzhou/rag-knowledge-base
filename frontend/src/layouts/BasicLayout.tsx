@@ -10,8 +10,7 @@ const menuItems = [
 
         key: '/documents',
         icon: <FileTextOutlined/>,
-        label: '文档管理',
-        disabled: true,
+        label: < Link to="/documents">文档管理</Link>,
     },
     {
 
@@ -22,9 +21,16 @@ const menuItems = [
     },
 ]
 
+function resolveSelectedKey(pathname: string): string {
+    ///documents/xxx 也保持"文档管理”高亮
+    if (pathname.startsWith('/documents')) return '/documents'
+    if (pathname.startsWith('/chat')) return '/chat'
+    return '/'
+}
+
 export function BasicLayout() {
     const location = useLocation()
-
+    const selectedKey= resolveSelectedKey(location.pathname)
     return (
         <Layout style={{minHeight: '100vh'}}>
             <Sider breakpoint="lg" collapsedWidth={64}>
@@ -41,10 +47,9 @@ export function BasicLayout() {
                     RAG 知识库
                 </div>
                 <Menu
-
                     theme="dark"
                     mode="inline"
-                    selectedKeys={[location.pathname]}
+                    selectedKeys={[selectedKey]}
                     items={menuItems}
                 />
             </Sider>
