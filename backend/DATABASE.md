@@ -55,10 +55,79 @@
 - 主键：`id`
 - 外键索引：`document_id`
 - 普通索引：`chunk_hash`
+- **向量索引:** `ix_document_chunks_embedding_hnsw` — pgvector HNSW,`vector_cosine_ops`(余弦距离),`m/ef_construction` 用默认值
 
 **外键约束：**
 - `document_id → documents(id) ON DELETE CASCADE`
 - 删除文档时，数据库自动删除所有关联 chunks
+
+---
+
+### 1.3 `conversations` — 会话主表
+
+多轮问答的会话容器,每次新建会话对应一行。
+
+| 列名 | 类型 | 约束 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| id | UUID | PK | `uuid4()` | 主键 |
+| title | VARCHAR(256) | NOT NULL | `'新对话'` | 会话标题 |
+| created_at | TIMESTAMPTZ | NOT NULL | `NOW()` | 创建时间 |
+| updated_at | TIMESTAMPTZ | NOT NULL | `NOW()` | 更新时间,自动刷新 |
+
+**索引:**
+- 主键:`id`
+
+> 预留:后续接入用户体系时会追加 `user_id` 列。
+
+---
+
+### 1.4 `messages` — 消息表
+
+一轮问答产生的一条消息(user / assistant / system)。
+
+| 列名 | 类型 | 约束 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| id | UUID | PK | `uuid4()` | 主键 |
+| conversation_id | UUID | FK, NOT NULL, INDEX | — | 所属会话,级联删除 |
+| role | VARCHAR(16) | NOT NULL | — | 角色:`user` / `assistant` / `system` |
+| content | TEXT | NOT NULL | — | 消息正文 |
+| metadata | JSONB | NOT NULL | `'{}'` | 扩展字段:model / token / latency 等 |
+| created_at | TIMESTAMPTZ | NOT NULL | `NOW()` | 创建时间 |
+
+**索引:**
+- 主键:`id`
+- 外键索引:`conversation_id`
+
+**外键约束:**
+- `conversation_id → conversations(id) ON DELETE CASCADE`
+
+---
+
+### 1.5 `answer_citations` — 回答引用快照
+
+assistant 消息引用的 chunk 快照。**冗余持久化文档名 / 页码 / 引文**,保证 chunk 被覆盖或文档被删后,历史会话仍可展示当时的引用原文。
+
+| 列名 | 类型 | 约束 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| id | UUID | PK | `uuid4()` | 主键 |
+| message_id | UUID | FK, NOT NULL, INDEX | — | 所属 assistant 消息,级联删除 |
+| ordinal | INTEGER | NOT NULL | — | prompt 中的「片段 N」编号,从 1 开始 |
+| document_id | UUID | FK, NULLABLE | — | 源文档,原文档被删则置 NULL |
+| chunk_id | UUID | FK, NULLABLE | — | 源 chunk,被覆盖 / 删除则置 NULL |
+| document_name | VARCHAR(512) | NOT NULL | — | 文档名快照 |
+| page_no | INTEGER | NULLABLE | — | 页码快照 |
+| quote | TEXT | NOT NULL | — | 引文原文快照 |
+
+**索引:**
+- 主键:`id`
+- 外键索引:`message_id`
+
+**外键约束:**
+- `message_id → messages(id) ON DELETE CASCADE`
+- `document_id → documents(id) ON DELETE SET NULL`
+- `chunk_id → document_chunks(id) ON DELETE SET NULL`
+
+> 为什么用 `ordinal` 而不是靠 `id` 排序:UUID 是随机的无法用于排序,而 prompt 里给 LLM 看的「片段 N」编号必须持久化,才能保证刷新后引用顺序与 LLM 当时看到的一致。
 
 ---
 
@@ -82,18 +151,40 @@ uploading → parsing → indexing → ready
                                 failed（任意阶段）
 ```
 
+`messages.role` 字段取值:
+
+| 值 | 说明 |
+|----|------|
+| `user` | 用户输入 |
+| `assistant` | LLM 回答 |
+| `system` | 系统提示 |
+
 ---
 
 ## 3. 关联关系
 
 ```
 documents (1) ──── (N) document_chunks
+                                │
+                                │ (可空引用,SET NULL)
+                                ▼
+conversations (1) ── (N) messages (1) ── (N) answer_citations
+                                                     │
+                                                     └──▶ documents (可空,SET NULL)
 ```
 
-- `Document` 与 `DocumentChunk` 是一对多关系
-- 通过 `document_id` 外键关联
-- `ON DELETE CASCADE`：删除文档时自动级联删除所有关联 chunks
-- `passive_deletes=True`：SQLAlchemy 不逐条删除，交由数据库处理，性能更优
+**文档侧:**
+- `Document` ↔ `DocumentChunk` 一对多,`ON DELETE CASCADE`
+- `passive_deletes=True`:SQLAlchemy 不逐条删除,交由数据库处理
+
+**会话侧:**
+- `Conversation` ↔ `Message` 一对多,`ON DELETE CASCADE`
+- `Message` ↔ `AnswerCitation` 一对多,`ON DELETE CASCADE`(assistant 消息才有引用)
+
+**跨域引用(引用快照):**
+- `AnswerCitation.document_id → documents.id` `ON DELETE SET NULL`
+- `AnswerCitation.chunk_id → document_chunks.id` `ON DELETE SET NULL`
+- 文档 / chunk 被删除后,引用记录仍保留,通过冗余的 `document_name / page_no / quote` 展示历史内容
 
 ---
 
@@ -107,6 +198,9 @@ documents (1) ──── (N) document_chunks
 | `embedding_dim` | 1024 | 向量维度，与 pgvector 的 vector(n) 一致 |
 | `chunk_size` | 600 | 文档切分块大小（字符数） |
 | `chunk_overlap` | 60 | 切分重叠窗口（字符数） |
+| `retrieval_top_k` | 5 | 向量检索 Top-K,交给 LLM 的候选 chunk 数 |
+| `retrieval_min_score` | 0.6 | 拒答阈值:Top-K 最高分低于此值直接拒答 |
+| `chat_history_window` | 5 | 多轮窗口:塞进 prompt 的历史轮数 |
 
 ---
 
@@ -146,6 +240,40 @@ CREATE TABLE document_chunks (
 
 CREATE INDEX idx_document_chunks_document_id ON document_chunks(document_id);
 CREATE INDEX idx_document_chunks_chunk_hash ON document_chunks(chunk_hash);
+
+-- pgvector HNSW 索引(cosine 距离),向量检索走此索引
+CREATE INDEX ix_document_chunks_embedding_hnsw
+    ON document_chunks USING hnsw (embedding vector_cosine_ops);
+
+-- 聊天相关表
+CREATE TABLE conversations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title VARCHAR(256) NOT NULL DEFAULT '新对话',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    role VARCHAR(16) NOT NULL,
+    content TEXT NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX ix_messages_conversation_id ON messages(conversation_id);
+
+CREATE TABLE answer_citations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,
+    document_id UUID REFERENCES documents(id) ON DELETE SET NULL,
+    chunk_id UUID REFERENCES document_chunks(id) ON DELETE SET NULL,
+    document_name VARCHAR(512) NOT NULL,
+    page_no INTEGER,
+    quote TEXT NOT NULL
+);
+CREATE INDEX ix_answer_citations_message_id ON answer_citations(message_id);
 ```
 
 ---
@@ -176,4 +304,37 @@ JOIN documents d ON d.id = dc.document_id
 WHERE d.status = 'ready'
 ORDER BY dc.embedding <=> :query_vector
 LIMIT 10;
+```
+
+**查询会话及其消息(按时间正序):**
+```sql
+SELECT * FROM messages
+WHERE conversation_id = :conv_id
+ORDER BY created_at ASC;
+```
+
+**查询某条 assistant 消息的引用(按 ordinal 排序):**
+```sql
+SELECT * FROM answer_citations
+WHERE message_id = :msg_id
+ORDER BY ordinal ASC;
+```
+
+---
+
+## 7. 迁移历史
+
+Alembic 迁移链(`backend/alembic/versions/`):
+
+| Revision | 说明 |
+|----------|------|
+| `ac611d4b45b9` | init: `documents` + `document_chunks` |
+| `4a73abaf8d87` | add chat tables (`conversations` / `messages` / `answer_citations`) + pgvector HNSW 索引 |
+
+常用命令(在 `backend/` 目录下):
+```bash
+alembic upgrade head       # 应用到最新
+alembic downgrade -1       # 回滚一步
+alembic current            # 查看当前版本
+alembic history            # 查看迁移链
 ```

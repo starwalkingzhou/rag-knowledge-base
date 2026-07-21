@@ -5,19 +5,18 @@ import {Link, Outlet, useLocation} from 'react-router-dom'
 const {Header, Sider, Content} = Layout
 
 const menuItems = [
-    {key: '/', icon: <DashboardOutlined/>, label: <Link to="/">#T</Link>},
+    {key: '/', icon: <DashboardOutlined/>, label: <Link to="/">首页</Link>},
     {
 
         key: '/documents',
         icon: <FileTextOutlined/>,
-        label: < Link to="/documents">文档管理</Link>,
+        label: <Link to="/documents">文档管理</Link>,
     },
     {
 
         key: '/chat',
         icon: <MessageOutlined/>,
-        label: '知识问答',
-        disabled: true,
+        label: <Link to="/chat">知识问答</Link>,
     },
 ]
 
@@ -30,7 +29,7 @@ function resolveSelectedKey(pathname: string): string {
 
 export function BasicLayout() {
     const location = useLocation()
-    const selectedKey= resolveSelectedKey(location.pathname)
+    const selectedKey = resolveSelectedKey(location.pathname)
     return (
         <Layout style={{minHeight: '100vh'}}>
             <Sider breakpoint="lg" collapsedWidth={64}>
