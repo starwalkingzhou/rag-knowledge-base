@@ -5,6 +5,17 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 MessageRoleValue = Literal["user", "assistant", "system"]
+QueryRouteValue = Literal["original", "rewrite", "hyde", "multi_query"]
+
+
+class QueryRouteRead(BaseModel):
+    """Query 优化的调试快照。仅 assistant 消息会带,前端用于渲染调试面板。"""
+
+    route: QueryRouteValue
+    query: str
+    rewritten_query: str | None = None
+    hyde_answer: str | None = None
+    multi_queries: list[str] | None = None
 
 
 class ConversationCreate(BaseModel):
@@ -54,26 +65,44 @@ class MessageRead(BaseModel):
     content: str
     created_at: datetime
     citations: list[CitationRead] = Field(default_factory=list)
+    query_route: QueryRouteRead | None = Field(default=None)
 
     @classmethod
     def from_orm_message(cls, message) -> "MessageRead":  # type: ignore[no-untyped-def]
+        is_assistant = message.role == "assistant"
         return cls(
             id=message.id,
             role=message.role,
             content=message.content,
             created_at=message.created_at,
             citations=[CitationRead.from_orm_citation(c) for c in message.citations]
-            if message.role == "assistant"
+            if is_assistant
             else [],
+            query_route=_parse_query_route(message.extra_metadata)
+            if is_assistant
+            else None,
         )
 
+def _parse_query_route(metadata: dict | None) -> QueryRouteRead | None:
+    """
+    从 messages.metadata 中提取 query_route 字段。
+    历史消息没有这个字段, 非法 / 缺失时静默返回 None, 不阻断接口。
+    """
+    if not metadata:
+        return None
+    raw = metadata.get("query_route")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return QueryRouteRead.model_validate(raw)
+    except Exception:
+        return None
 
 class ConversationDetail(BaseModel):
     """会话详情:会话本身 + 历史消息(含引用)。"""
 
     conversation: ConversationRead
     messages: list[MessageRead]
-
 
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)

@@ -15,6 +15,7 @@ from app.workflows.nodes import (
     normalize_query,
     retrieve,
     stream_generate,
+    route_query,
 )
 from app.workflows.rag_state import RAGState
 
@@ -84,6 +85,7 @@ class ChatService:
 
         # 校验会话存在用 service 自带 session;流式跑用独立 session
         """
+        logger.info("stream_answer start: conv=%s", conversation_id)
         await self.get_conversation(conversation_id)
 
         async with AsyncSessionLocal() as session:
@@ -93,11 +95,16 @@ class ChatService:
                     "question": question,
                 }
 
-                # 1. 加载上下文(仅历史消息,本轮 user 此刻尚未入库)+改写查询
+                # 1. 加载上下文(仅历史消息,本轮 user 此刻尚未入库) + 改写查询 + 路由
+                logger.info("step 1: load_context")
                 state.update(await load_context(state, session))
+                logger.info("step 2: normalize_query")
                 state.update(await normalize_query(state))
+                logger.info("step 3: route_query")
+                state.update(await route_query(state))
 
                 # 2. user 消息落库
+                logger.info("step 4: persist_user_message")
                 await self._persist_user_message(state, session)
 
                 yield {
@@ -105,7 +112,14 @@ class ChatService:
                     "data": {"user_message_id": str(state["user_message_id"])},
                 }
 
-                # 3. retrieve(含拒答判定)→先把引用发给前端,让参考资料面板立刻可见
+                # 3. 把query 路由结果推给前端调试面板(始终发送,前端按 route 选择渲染)
+                yield {
+                    "event": "query_route",
+                    "data": _build_query_route_payload(state),
+                }
+
+                # 4. retrieve(含拒答判定)→先把引用发给前端,让参考资料面板立刻可见
+                logger.info("step 5: retrieve")
                 state.update(await retrieve(state, session))
 
                 citations_payload = [
@@ -115,10 +129,9 @@ class ChatService:
                 yield {
                     "event": "citations",
                     "data": {"citations": citations_payload},
-
                 }
 
-                # 4. 生成:拒答直接走拒答文案;否则逐 token 流式
+                # 5. 生成:拒答直接走拒答文案;否则逐 token 流式
                 if state.get("refused"):
                     yield {
                         "event": "token",
@@ -131,7 +144,7 @@ class ChatService:
                         yield {"event": "token", "data": {"delta": delta}}
                     state["answer"] = "".join(answer_parts)
 
-                # 5. assistant 消息 +citations 同事务落库(保证两者原子)
+                # 6. assistant 消息 +citations 同事务落库(保证两者原子)
                 await self._persist_assistant_message(state, session)
 
                 yield {
@@ -139,7 +152,6 @@ class ChatService:
                     "data": {
                         "message_id": str(state["assistant_message_id"]),
                         "refused": bool(state.get("refused")),
-
                     },
                 }
             except Exception as exc:
@@ -181,7 +193,11 @@ class ChatService:
         assistant_msg = ConversationRepository.make_assistant_message(
             state["conversation_id"],
             content=state["answer"],
-            extra_metadata={"refused": bool(state.get("refused"))},
+            # 把 query 路由结果持久化到 metadata 字段,刷新历史时前端调试面板还能继续展示
+            extra_metadata={
+                "refused": bool(state.get("refused")),
+                "query_route": _build_query_route_payload(state),
+            },
         )
         await conv_repo.add_messages([assistant_msg])
 
@@ -204,3 +220,17 @@ class ChatService:
 
         await session.commit()
         state["assistant_message_id"] = assistant_msg.id
+
+
+def _build_query_route_payload(state: RAGState) -> dict:
+    """SSE / metadata共用的query_route载荷格式。
+
+    始终携带4个可选字段(None也保留), 前端可据此判断展示哪种调试面板。
+    """
+    return {
+        "route": state.get("route", "original"),
+        "query": state.get("query", ""),
+        "rewritten_query": state.get("rewritten_query"),
+        "hyde_answer": state.get("hyde_answer"),
+        "multi_queries": state.get("multi_queries"),
+    }

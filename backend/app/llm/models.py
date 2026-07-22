@@ -1,4 +1,4 @@
-from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
@@ -27,5 +27,6 @@ def get_chat_model() -> BaseChatModel:
         # 避免 [N] 编号在不同 chunk 间漂移
         temperature=0,
         streaming=True,
+        # request_timeout=60,
     )
     return _chat_model
