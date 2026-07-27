@@ -24,15 +24,15 @@ from uuid import UUID, uuid4
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
+    Computed,
     DateTime,
     ForeignKey,
     Integer,
     String,
     Text,
     func,
-
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.config import settings
@@ -97,6 +97,11 @@ class DocumentChunk(Base):
     chunk_hash: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     extra_metadata: Mapped[dict] = mapped_column(
         "metadata", JSONB, nullable=False, default=dict
+    )
+    content_tsv: Mapped[str] = mapped_column(
+        TSVECTOR,
+        Computed("to_tsvector('chinese_zh', content)", persisted=True),
+        nullable=False,
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -200,5 +205,6 @@ class AnswerCitation(Base):
     document_name: Mapped[str] = mapped_column(String(512), nullable=False)
     page_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
     quote: Mapped[str] = mapped_column(Text, nullable=False)
+    retrieval_meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     message: Mapped[Message] = relationship(back_populates="citations")

@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     # ==== 检索与问答 ====
     # 检索 Top - K: 交给 LLM 的候选 chunk 数量
     retrieval_top_k: int = 5
+    # 混合检索每路召回数量(大于 final,留出 RRF 融合空间)
+    retrieval_recall_top_k: int = 20
     # 拒答阈值:cosine similarity(=1- cosine_distance)的下限
     # Top-K 中最高分仍低于此值,直接拒答,不调 LLM
     retrieval_min_score: float = 0.6
@@ -70,6 +72,10 @@ class Settings(BaseSettings):
     query_route_enabled: bool = True
     # Multi-Query 策略生成的子查询数量,过大会增加 embedding 成本
     multi_query_count: int = 3
+
+    # ==== 混合检索 RRF(第6章) ====
+    # RRF 平滑常数 k:越小越偏向高排名条目;越大越平滑
+    rrf_k: int = 60
 
 
 @lru_cache(maxsize=1)

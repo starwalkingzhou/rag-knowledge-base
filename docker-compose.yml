@@ -1,6 +1,11 @@
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    # 自定义镜像：在 pgvector/pgvector:pg16 之上叠加 zhparser，
+    # 一次构建同时支持 pgvector（第 3 章）+ 中文全文检索（第 6 章）。
+    build:
+      context: .
+      dockerfile: postgres.Dockerfile
+    image: rag-kb-postgres:pg16
     container_name: rag-kb-postgres
     restart: unless-stopped
     environment:
@@ -12,7 +17,11 @@ services:
     volumes:
       - rag_kb_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rag} -d ${POSTGRES_DB:-rag_kb}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-rag} -d ${POSTGRES_DB:-rag_kb}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 10
