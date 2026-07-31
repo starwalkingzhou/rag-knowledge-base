@@ -77,6 +77,12 @@ class Settings(BaseSettings):
     # RRF 平滑常数 k:越小越偏向高排名条目;越大越平滑
     rrf_k: int = 60
 
+    # ===== Agentic RAG =====
+    # 关掉后图退化为单轮检索，作为单轮 vs agent 循环的对比开关
+    agent_loop_enabled: bool = True
+    # 最大检索轮次（含首轮）。LLM 决策最多触发 max_rounds-1 次再检索，避免循环调用
+    agent_max_rounds: int = 3
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

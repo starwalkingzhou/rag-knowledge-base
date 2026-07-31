@@ -161,3 +161,56 @@ def build_hyde_messages(question: str) -> list[BaseMessage]:
 
 def build_multi_query_messages(question: str, n: int) -> list[BaseMessage]:
     return list(MULTI_QUERY_PROMPT.invoke({"question": question, "n": n}).to_messages())
+
+
+# ===== Agentic RAG 决策者 Prompt(第7章) =====
+# 输入:原问题 + 当前 query/route + 历史轮次观察;输出:下一步决策 JSON
+
+_AGENT_PLAN_SYSTEM = """你是RAG系统的检索决策者。根据检索到的片段判断能否回答用户问题。
+如果上一轮检索结果不佳(Top1相似度偏低或无命中),请基于历史轮次观察决定下一步。
+
+可选action:
+- proceed:结果已够用,进入生成答案
+- rewrite_query:当前query表述不清/口语化,需要改写(必须给出new_query)
+- switch_route:换检索策略(给出new_route,取值为original / rewrite / hyde / multi_query之一)
+- refuse:多轮仍找不到相关内容,提前拒答
+
+策略建议:
+- 若上一轮用了rewrite仍失败,优先试hyde或multi_query
+- 若已用过multi_query仍失败,优先refuse,避免无意义改写
+- 问题含明确实体/编号但检索无命中,优先refuse
+
+只输出**单行JSON**,键固定为action / reason / new_query / new_route,缺失字段填null。
+示例:{{"action":"rewrite_query","reason":"原query含指代","new_query":"差旅住宿标准","new_route":null}}
+"""
+
+_AGENT_PLAN_HUMAN = """用户原始问题:{question}
+当前query:{current_query}
+当前route:{current_route}
+
+历史轮次观察:
+{history}
+
+请输出下一步决策的JSON。"""
+
+AGENT_PLAN_PROMPT = ChatPromptTemplate.from_messages(
+    [("system", _AGENT_PLAN_SYSTEM), ("human", _AGENT_PLAN_HUMAN)]
+)
+
+
+def build_agent_plan_messages(
+    question: str,
+    current_query: str,
+    current_route: str,
+    history: str,
+) -> list[BaseMessage]:
+    prompt_value = AGENT_PLAN_PROMPT.invoke(
+        {
+            "question": question,
+            "current_query": current_query,
+            "current_route": current_route,
+            "history": history,
+        }
+    )
+    return list(prompt_value.to_messages())
+

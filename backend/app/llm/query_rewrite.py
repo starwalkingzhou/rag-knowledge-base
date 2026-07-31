@@ -62,11 +62,17 @@ class QueryRewriter:
         queries = [line.strip(" -·* 0123456789.、 ") for line in text.splitlines()]
         return [q for q in queries if q][:n]
 
-    async def optimize(self, question: str, multi_query_count: int) -> QueryRouteResult:
-        """按 route 分发并填充结果。任何一步失败都安全降级到original。"""
-        try:
+    async def apply_route(
+        self, question: str, route: QueryRoute, multi_query_count: int
+    ) -> QueryRouteResult:
+        """已知目标 route 时,按 route 执行对应改写链并填充 QueryRouteResult。
 
-            route = await self.decide_route(question)
+        与 optimize 的差别:optimize 内部先 decide_route 再调本方法分发;
+        apply_route 跳过判定,直接按调用方给定的 route 执行——第7章 Agentic RAG
+        在 switch_route 决策时由 planner 直接指定 route,复用这套分发逻辑把字段填齐,
+        避免在 plan_retrieval 节点再写一遍 if-elif 和降级。
+        """
+        try:
             if route == "rewrite":
                 rewritten = await self.rewrite(question)
                 # rewrite 返回空也降级,避免后续用空字符串去 embedding
@@ -95,9 +101,22 @@ class QueryRewriter:
             return QueryRouteResult(route="original", query=question)
         except Exception:
             logger.exception(
-                "query optimize 失败,降级到 original:question=%r", question
+                "apply_route 失败，降级到 original: route=%s question=%r",
+                route,
+                question,
             )
             return QueryRouteResult(route="original", query=question)
+
+    async def optimize(self, question: str, multi_query_count: int) -> QueryRouteResult:
+        """完整 4 选 1:先判定 route,再分发到 apply_route。任何一步失败都降级 original。"""
+        try:
+            route = await self.decide_route(question)
+        except Exception:
+            logger.exception(
+                "query route 判定失败，降级到 original: question=%r", question
+            )
+            return QueryRouteResult(route="original", query=question)
+        return await self.apply_route(question, route, multi_query_count)
 
 _rewriter: QueryRewriter | None = None
 

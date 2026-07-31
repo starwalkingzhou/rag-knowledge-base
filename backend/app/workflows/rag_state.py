@@ -29,6 +29,16 @@ class RAGState(TypedDict, total=False):
     # 是否触发拒答(检索不足)。True 时跳过 generate
     refused: bool
 
+    # ===== Agentic RAG 循环 =====
+    # 每轮决策/观察的轨迹,形如
+    # {round, action, reason, route, query, retrieved_count, top_score, sufficient}
+    # 由 plan_retrieval(决策) 和 observe_context(观察) 追加
+    agent_steps: list[dict]
+    # 当前是第几轮检索
+    retrieval_round: int
+    # observe_context 判定候选是否够用;True 则走向终点
+    context_sufficient: bool
+
     # generate 产出
     answer: str
 
