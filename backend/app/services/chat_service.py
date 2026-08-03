@@ -4,11 +4,14 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import AnswerCitation, Conversation, Message
 from app.db.repositories.citation_repo import AnswerCitationRepository
 from app.db.repositories.conversation_repo import ConversationRepository
 from app.db.session import AsyncSessionLocal
+from app.llm.answer_verifier import VerifyResult, get_answer_verifier
+from app.llm.prompts import REFUSAL_ANSWER
 from app.retrieval.vector_retriever import RetrievedChunk
 from app.workflows.graph import get_rag_graph
 from app.workflows.nodes import load_context, stream_generate
@@ -31,6 +34,9 @@ def _build_retrieval_meta(chunk: RetrievedChunk) -> dict:
         ),
         "rrf_score": (
             round(chunk.rrf_score, 6) if chunk.rrf_score is not None else None
+        ),
+        "rerank_score": (
+            round(chunk.rerank_score, 4) if chunk.rerank_score is not None else None
         ),
     }
 
@@ -87,6 +93,19 @@ class ChatService:
         messages = await repo.list_messages(conversation_id)
         return conversation, messages
 
+    async def list_conversations(
+        self, page: int, page_size: int
+    ) -> tuple[list[tuple[Conversation, int]], int]:
+        repo = ConversationRepository(self.session)
+        return await repo.list_page(page=page, page_size=page_size)
+
+    async def delete_conversation(self, conversation_id: UUID) -> None:
+        repo = ConversationRepository(self.session)
+        deleted = await repo.delete(conversation_id)
+        if not deleted:
+            raise NotFoundError("会话不存在")
+        await self.session.commit()
+
     # 注意缩进,这些都是 ChatService 类里的函数
     async def stream_answer(
             self, conversation_id: UUID, question: str
@@ -94,10 +113,12 @@ class ChatService:
         """逐事件 yield SSE 载荷。
 
         事件协议(与前端约定):
-        message_start -> query_route -> agent_steps -> citations -> token... -> message_end
+        message_start -> query_route -> agent_steps -> citations -> token...
+        -> [verify_result] -> message_end
+        拒答路径不下发 verify_result(已是终态)。
+        verify_result.verified=False 时载荷带 replacement_answer,前端据此整段替换
+        流式正文,与 PRD「校验失败 -> 拒答替换」对齐。
         任何阶段出错则改 yield error 并提前结束。
-
-        # 校验会话存在用 service 自带 session;流式跑用独立 session
         """
         logger.info("stream_answer start: conv=%s", conversation_id)
         await self.get_conversation(conversation_id)
@@ -158,6 +179,7 @@ class ChatService:
                 }
 
                 # 5. 生成:拒答直接走拒答文案;否则逐 token 流式
+                verify_result: VerifyResult | None = None
                 if state.get("refused"):
                     yield {
                         "event": "token",
@@ -170,8 +192,34 @@ class ChatService:
                         yield {"event": "token", "data": {"delta": delta}}
                     state["answer"] = "".join(answer_parts)
 
-                # 6. assistant 消息 +citations 同事务落库(保证两者原子)
-                await self._persist_assistant_message(state, session)
+                    # 6. 答案校验，verify 失败替换为拒答文案
+                    # verify 只在非拒答路径执行：拒答已有 REFUSAL_ANSWER，再校验无意义
+                    if settings.verify_answer_enabled:
+                        verify_result = await get_answer_verifier().verify(
+                            question=state["query"],
+                            answer=state["answer"],
+                            chunks=state.get("retrieved_chunks", []),
+                        )
+                        replacement = (
+                            REFUSAL_ANSWER if not verify_result.verified else None
+                        )
+                        if not verify_result.verified:
+                            # 严格按 PRD:统一拒答文案 + 标 refused;
+                            # 前端按 replacement_answer 覆盖正文并清空 citations
+                            state["answer"] = REFUSAL_ANSWER
+                            state["refused"] = True
+                            yield {
+                                "event": "verify_result",
+                                "data": _build_verify_payload(
+                                    verify_result,
+                                    replacement_answer=replacement,
+                                ),
+                            }
+
+                # 7. assistant 消息 + citations 同事务落库(保证两者原子)
+                await self._persist_assistant_message(
+                    state, session, verify_result=verify_result
+                )
 
                 yield {
                     "event": "message_end",
@@ -197,11 +245,17 @@ class ChatService:
     async def _persist_user_message(
             self, state: RAGState, session: AsyncSession
     ) -> None:
-        """流式开始前先把 user 消息落库并 commit。
+        """流式开始前先把 user 消息落库并 commit；首次提问顺带把会话标题改成问题前 30 字。
 
-        必须在load_context之后调用: load_context读到的“历史消息”不应包含本轮提问。
+        必须在 load_context 之后调用: load_context 读到的「历史消息」不应包含本轮提问。
+        标题更新与 user 消息同事务,避免侧栏短暂停留在「新对话」。
         """
         repo = ConversationRepository(session)
+        # 首次提问（会话还没有任何消息） -> 把默认标题改成本次问题
+        if await repo.count_messages(state["conversation_id"]) == 0:
+            await repo.update_title_if_default(
+                state["conversation_id"], state["question"]
+            )
         user_msg = ConversationRepository.make_user_message(
             state["conversation_id"], content=state["question"]
         )
@@ -210,21 +264,32 @@ class ChatService:
         state["user_message_id"] = user_msg.id
 
     async def _persist_assistant_message(
-            self, state: RAGState, session: AsyncSession
+            self,
+            state: RAGState,
+            session: AsyncSession,
+            *,
+            verify_result: VerifyResult | None = None,
     ) -> None:
         """流式生成结束后落库 assistant 消息及其引用, 单事务保证两者原子。"""
         conv_repo = ConversationRepository(session)
         citation_repo = AnswerCitationRepository(session)
 
+        extra_metadata: dict = {
+            "refused": bool(state.get("refused")),
+            "query_route": _build_query_route_payload(state),
+            "agent_steps": _serialize_agent_steps(state),
+        }
+        if verify_result is not None:
+            # verify_result 复用 SSE 载荷格式，但 metadata 不需要 replacement_answer
+            extra_metadata["verify_result"] = _build_verify_payload(
+                verify_result, replacement_answer=None
+            )
+
         assistant_msg = ConversationRepository.make_assistant_message(
             state["conversation_id"],
             content=state["answer"],
             # 把 query 路由结果持久化到 metadata 字段,刷新历史时前端调试面板还能继续展示
-            extra_metadata={
-                "refused": bool(state.get("refused")),
-                "query_route": _build_query_route_payload(state),
-                "agent_steps": _serialize_agent_steps(state),
-            },
+            extra_metadata=extra_metadata,
         )
         await conv_repo.add_messages([assistant_msg])
 
@@ -262,6 +327,23 @@ def _build_query_route_payload(state: RAGState) -> dict:
         "hyde_answer": state.get("hyde_answer"),
         "multi_queries": state.get("multi_queries"),
     }
+
+
+def _build_verify_payload(
+    result: VerifyResult, *, replacement_answer: str | None
+) -> dict:
+    """verify_result SSE / metadata 共用载荷。
+
+    replacement_answer 仅在 verified=False 时携带；前端按它整段替换流式出来的答案，
+    与 PRD「verify 失败 -> 拒答替换」语义对齐。
+    """
+    payload: dict = {
+        "verified": result.verified,
+        "reason": result.reason or None,
+    }
+    if not result.verified and replacement_answer is not None:
+        payload["replacement_answer"] = replacement_answer
+    return payload
 
 
 def _serialize_agent_steps(state: RAGState) -> list[dict]:

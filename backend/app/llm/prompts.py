@@ -163,6 +163,34 @@ def build_multi_query_messages(question: str, n: int) -> list[BaseMessage]:
     return list(MULTI_QUERY_PROMPT.invoke({"question": question, "n": n}).to_messages())
 
 
+# ===== 多轮上下文改写(normalize_query) =====
+_CONTEXTUALIZE_SYSTEM = """你是多轮对话的查询改写助手。请根据对话历史,把用户当前问题改写成一个**独立完整、可单独检索**的查询。
+
+要求:
+- 消解指代(“它”、“这个”、“上面说的”等),从历史中补齐被省略的主语/宾语。
+- 不要回答问题,不要扩写含义,不要改变用户意图。
+- 不要加引号、编号或解释,只输出改写后的单行查询。
+- 若当前问题本身已经独立完整,原样输出即可。
+
+【对话历史】
+{history}
+"""
+
+_CONTEXTUALIZE_HUMAN = "{question}"
+
+CONTEXTUALIZE_PROMPT = ChatPromptTemplate.from_messages(
+    [("system", _CONTEXTUALIZE_SYSTEM), ("human", _CONTEXTUALIZE_HUMAN)]
+)
+
+
+def build_contextualize_messages(question: str, history: str) -> list[BaseMessage]:
+    return list(
+        CONTEXTUALIZE_PROMPT.invoke(
+            {"question": question, "history": history}
+        ).to_messages()
+    )
+
+
 # ===== Agentic RAG 决策者 Prompt(第7章) =====
 # 输入:原问题 + 当前 query/route + 历史轮次观察;输出:下一步决策 JSON
 
@@ -213,4 +241,53 @@ def build_agent_plan_messages(
         }
     )
     return list(prompt_value.to_messages())
+
+
+# ===== 答案校验 Prompt(第8章) =====
+# 校验模型回答是否完全被参考片段支撑;输出 verified / reason JSON
+
+_VERIFY_ANSWER_SYSTEM = """你是RAG答案可信度校验员。判断模型回答是否**完全被给定的参考片段支撑**。
+
+判定标准:
+- 回答中的每一个关键事实结论(数字、名称、规则、时间、条款)都必须能在片段原文中**直接找到**依据。
+- 礼貌用语、过渡句、复述问题可忽略。
+- 若回答使用了[N]引用标记,请核对片段N是否真的支撑该结论。
+- 若回答明确表示"知识库中未找到",视为 verified=true。
+
+判定结果:
+- verified=true:所有关键结论均有依据
+- verified=false:存在编造、张冠李戴或片段未提及的事实
+
+只输出**单行JSON**,键为 verified(布尔) 和 reason(一句中文说明)。
+示例:{{"verified": false, "reason": "答案提到差旅住宿 800 元，片段中只提到 600 元"}}
+"""
+
+_VERIFY_ANSWER_HUMAN = """【用户问题】
+{question}
+
+【参考片段】
+{chunks_text}
+
+【模型回答】
+{answer}
+
+请输出校验结果 JSON。"""
+
+VERIFY_ANSWER_PROMPT = ChatPromptTemplate.from_messages(
+    [("system", _VERIFY_ANSWER_SYSTEM), ("human", _VERIFY_ANSWER_HUMAN)]
+)
+
+
+def build_verify_answer_messages(
+    question: str, answer: str, chunks_text: str
+) -> list[BaseMessage]:
+    return list(
+        VERIFY_ANSWER_PROMPT.invoke(
+            {
+                "question": question,
+                "answer": answer,
+                "chunks_text": chunks_text,
+            }
+        ).to_messages()
+    )
 

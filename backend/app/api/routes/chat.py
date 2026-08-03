@@ -1,7 +1,7 @@
 from collections.abc import AsyncIterator
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from app.api.deps import DbSession
@@ -9,6 +9,8 @@ from app.api.schemas.chat import (
     ChatRequest,
     ConversationCreate,
     ConversationDetail,
+    ConversationListItem,
+    ConversationPage,
     ConversationRead,
     MessageRead,
 )
@@ -33,6 +35,35 @@ async def create_conversation(
 
 
 @router.get(
+    "",
+    response_model=ConversationPage,
+    operation_id="listConversations",
+    summary="按更新时间倒序分页列出所有会话",
+)
+async def list_conversations(
+    session: DbSession,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> ConversationPage:
+    service = ChatService(session)
+    items, total = await service.list_conversations(page=page, page_size=page_size)
+    return ConversationPage(
+        items=[
+            ConversationListItem(
+                id=conv.id,
+                title=conv.title,
+                updated_at=conv.updated_at,
+                message_count=count,
+            )
+            for conv, count in items
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get(
     "/{conversation_id}",
     response_model=ConversationDetail,
     operation_id="getConversation",
@@ -48,6 +79,21 @@ async def get_conversation(
         conversation=ConversationRead.model_validate(conversation),
         messages=[MessageRead.from_orm_message(m) for m in messages],
     )
+
+
+@router.delete(
+    "/{conversation_id}",
+    status_code=204,
+    operation_id="deleteConversation",
+    summary="删除会话及其全部消息",
+)
+async def delete_conversation(
+    conversation_id: UUID,
+    session: DbSession,
+) -> Response:
+    service = ChatService(session)
+    await service.delete_conversation(conversation_id)
+    return Response(status_code=204)
 
 
 @router.post(

@@ -83,6 +83,28 @@ class Settings(BaseSettings):
     # 最大检索轮次（含首轮）。LLM 决策最多触发 max_rounds-1 次再检索，避免循环调用
     agent_max_rounds: int = 3
 
+    # ===== Reranker(第8章,DashScope qwen3-rerank) =====
+    # 关掉后 rerank 节点透传,方便对比有/无精排的效果
+    rerank_enabled: bool = True
+    # DashScope rerank 兼容接口(不是 OpenAI 标准)
+    rerank_base_url: str = "https://dashscope.aliyuncs.com/compatible-api/v1/reranks"
+    rerank_model: str = "qwen3-rerank"
+    rerank_api_key: str = ""
+    # Top1 relevance_score 阈值;模型输出 ∈ [0,1],低于此值视为"上下文不足"
+    # 由 judge_context 节点据此触发拒答
+    rerank_min_score: float = 0.3
+    # 单次精排请求超时(秒);精排挂在问答同步链路上,超时要短
+    rerank_timeout: float = 8.0
+
+    # ===== 答案校验(第8章) =====
+    # 关掉后跳过 verify_answer 调用,方便对比有/无引用支撑校验
+    verify_answer_enabled: bool = True
+
+    @property
+    def effective_rerank_api_key(self) -> str:
+        """Rerank 与 chat 通常共用同一 DashScope key;单独配了就优先用单独的。"""
+        return self.rerank_api_key or self.chat_api_key
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

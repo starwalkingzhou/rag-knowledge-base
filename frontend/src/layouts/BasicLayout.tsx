@@ -42,7 +42,6 @@ export function BasicLayout() {
                         fontSize: 16,
                     }}
                 >
-
                     RAG 知识库
                 </div>
                 <Menu

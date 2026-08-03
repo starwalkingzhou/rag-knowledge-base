@@ -132,6 +132,54 @@ export type ConversationDetail = {
 };
 
 /**
+ * ConversationListItem
+ *
+ * 侧栏会话列表项;比 ConversationRead 多 message_count。
+ */
+export type ConversationListItem = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+    /**
+     * Message Count
+     */
+    message_count: number;
+};
+
+/**
+ * ConversationPage
+ *
+ * 会话列表分页响应,与文档分页同构(page / page_size 风格)。
+ */
+export type ConversationPage = {
+    /**
+     * Items
+     */
+    items: Array<ConversationListItem>;
+    /**
+     * Total
+     */
+    total: number;
+    /**
+     * Page
+     */
+    page: number;
+    /**
+     * Page Size
+     */
+    page_size: number;
+};
+
+/**
  * ConversationRead
  */
 export type ConversationRead = {
@@ -397,6 +445,7 @@ export type MessageRead = {
      * Agent Steps
      */
     agent_steps?: Array<AgentStep> | null;
+    verify_result?: VerifyResultRead | null;
 };
 
 /**
@@ -463,6 +512,10 @@ export type RetrievalMeta = {
      * Rrf Score
      */
     rrf_score?: number | null;
+    /**
+     * Rerank Score
+     */
+    rerank_score?: number | null;
 };
 
 /**
@@ -491,6 +544,25 @@ export type ValidationError = {
     ctx?: {
         [key: string]: unknown;
     };
+};
+
+/**
+ * VerifyResultRead
+ *
+ * answer_verifier 校验结果;落在 messages.extra_metadata.verify_result。
+ *
+ * - verified=True:答案被参考片段支撑,reason 通常为空
+ * - verified=False:触发拒答替换(service 层已覆盖 answer / refused),reason 记录失败原因
+ */
+export type VerifyResultRead = {
+    /**
+     * Verified
+     */
+    verified: boolean;
+    /**
+     * Reason
+     */
+    reason?: string | null;
 };
 
 export type HealthAppData = {
@@ -804,6 +876,40 @@ export type GetDocumentChunkResponses = {
 
 export type GetDocumentChunkResponse = GetDocumentChunkResponses[keyof GetDocumentChunkResponses];
 
+export type ListConversationsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Page
+         */
+        page?: number;
+        /**
+         * Page Size
+         */
+        page_size?: number;
+    };
+    url: '/api/conversations';
+};
+
+export type ListConversationsErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ListConversationsError = ListConversationsErrors[keyof ListConversationsErrors];
+
+export type ListConversationsResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConversationPage;
+};
+
+export type ListConversationsResponse = ListConversationsResponses[keyof ListConversationsResponses];
+
 export type CreateConversationData = {
     body: ConversationCreate;
     path?: never;
@@ -828,6 +934,36 @@ export type CreateConversationResponses = {
 };
 
 export type CreateConversationResponse = CreateConversationResponses[keyof CreateConversationResponses];
+
+export type DeleteConversationData = {
+    body?: never;
+    path: {
+        /**
+         * Conversation Id
+         */
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/conversations/{conversation_id}';
+};
+
+export type DeleteConversationErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type DeleteConversationError = DeleteConversationErrors[keyof DeleteConversationErrors];
+
+export type DeleteConversationResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type DeleteConversationResponse = DeleteConversationResponses[keyof DeleteConversationResponses];
 
 export type GetConversationData = {
     body?: never;

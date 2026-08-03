@@ -36,8 +36,11 @@ class RAGState(TypedDict, total=False):
     agent_steps: list[dict]
     # 当前是第几轮检索
     retrieval_round: int
-    # observe_context 判定候选是否够用;True 则走向终点
+    # observe_context 判定本轮候选是否足够; True 时图走出循环进入 rerank
     context_sufficient: bool
+    # rerank 后基于 Top1 score 的拒答闸门
+    # False 时图走向 refuse 节点; True 时图走向 END
+    context_is_enough: bool
 
     # generate 产出
     answer: str
