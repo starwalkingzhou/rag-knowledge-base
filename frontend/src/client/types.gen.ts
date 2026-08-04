@@ -446,6 +446,14 @@ export type MessageRead = {
      */
     agent_steps?: Array<AgentStep> | null;
     verify_result?: VerifyResultRead | null;
+    /**
+     * Trace Id
+     */
+    trace_id?: string | null;
+    /**
+     * Trace Url
+     */
+    trace_url?: string | null;
 };
 
 /**

@@ -7,11 +7,13 @@ from app.api.error_handlers import register_error_handlers
 from app.api.routes import chat, documents, health
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
+from app.core.observability import configure_observability
 
 
 def create_app() -> FastAPI:
     """创建并配置 FastAPI 应用实例。"""
     configure_logging()
+    configure_observability()
     logger = get_logger(__name__)
 
     app = FastAPI(title=settings.app_name)

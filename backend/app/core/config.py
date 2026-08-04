@@ -100,10 +100,26 @@ class Settings(BaseSettings):
     # 关掉后跳过 verify_answer 调用,方便对比有/无引用支撑校验
     verify_answer_enabled: bool = True
 
+    # ===== LangSmith 可观测性 =====
+    # 关掉后 @traceable / LangChain 自动追踪降级为 no-op,trace_id 返回 None;
+    # 开发期不填 LangSmith key 不影响项目正常跑。
+    langsmith_tracing: bool = False
+    langsmith_api_key: str = ""
+    langsmith_project: str = "rag-knowledge-base"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    # 私有化 LangSmith UI 的 URL 前缀(含 workspace / org 信息),
+    # 仅配置了才发给前端做跳转链接。
+    langsmith_run_url_prefix: str = ""
+
     @property
     def effective_rerank_api_key(self) -> str:
         """Rerank 与 chat 通常共用同一 DashScope key;单独配了就优先用单独的。"""
         return self.rerank_api_key or self.chat_api_key
+
+    @property
+    def observability_enabled(self) -> bool:
+        """LangSmith 实际生效条件：开关打开 + key 已配置。任一缺失都视为关闭。"""
+        return bool(self.langsmith_tracing and self.langsmith_api_key)
 
 
 @lru_cache(maxsize=1)

@@ -8,6 +8,7 @@
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from langsmith import traceable
 
 from app.db.repositories.chunk_repo import DocumentChunkRepository
 from app.retrieval.vector_retriever import RetrievedChunk
@@ -17,6 +18,7 @@ class KeywordRetriever:
     def __init__(self, session: AsyncSession) -> None:
         self.chunk_repo = DocumentChunkRepository(session)
 
+    @traceable(name="KeywordRetriever.search", run_type="retriever")
     async def search(self, query: str, top_k: int) -> list[RetrievedChunk]:
         rows = await self.chunk_repo.keyword_search(query, top_k)
         return [

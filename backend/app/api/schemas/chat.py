@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.observability import build_trace_url
+
 MessageRoleValue = Literal["user", "assistant", "system"]
 QueryRouteValue = Literal["original", "rewrite", "hyde", "multi_query"]
 AgentActionValue = Literal[
@@ -140,10 +142,13 @@ class MessageRead(BaseModel):
     agent_steps: list[AgentStep] | None = None
     # 第 8 章 answer_verifier 校验结果; user / 旧消息 / 拒答路径为 None
     verify_result: VerifyResultRead | None = None
+    trace_id: str | None = None
+    trace_url: str | None = None
 
     @classmethod
     def from_orm_message(cls, message) -> "MessageRead":  # type: ignore[no-untyped-def]
         is_assistant = message.role == "assistant"
+        trace_id = _parse_trace_id(message.extra_metadata) if is_assistant else None
         return cls(
             id=message.id,
             role=message.role,
@@ -161,6 +166,8 @@ class MessageRead(BaseModel):
             verify_result=_parse_verify_result(message.extra_metadata)
             if is_assistant
             else None,
+            trace_id=trace_id,
+            trace_url=build_trace_url(trace_id),
         )
 
 def _parse_query_route(metadata: dict | None) -> QueryRouteRead | None:
@@ -208,6 +215,16 @@ def _parse_verify_result(metadata: dict | None) -> VerifyResultRead | None:
         return VerifyResultRead.model_validate(raw)
     except Exception:
         return None
+
+
+def _parse_trace_id(metadata: dict | None) -> str | None:
+    """从 messages.extra_metadata 中提取 trace_id。"""
+    if not metadata:
+        return None
+    raw = metadata.get("trace_id")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    return raw
 
 
 def _parse_retrieval_meta(raw: dict | None) -> RetrievalMeta | None:

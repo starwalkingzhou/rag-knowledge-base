@@ -21,4 +21,7 @@ dependencies = [
     "python-multipart>=0.0.32",
     "langgraph>=1.2.9",
     "httpx>=0.28.1",
+    "langsmith>=0.8.3",
+    "ragas>=0.4.3",
+    "langchain-community<0.4.2",
 ]
