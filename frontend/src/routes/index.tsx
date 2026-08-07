@@ -4,10 +4,11 @@ import {HomePage} from '@/pages/HomePage'
 import {DocumentsPage} from '@/pages/DocumentsPage'
 import {DocumentDetailPage} from '@/pages/DocumentDetailPage'
 import {ChatPage} from '@/pages/ChatPage'
+import {EvaluationListPage} from '@/pages/EvaluationListPage'
+import {EvaluationDetailPage} from '@/pages/EvaluationDetailPage'
 
 export const router = createBrowserRouter([
     {
-
         path: '/',
         element: <BasicLayout/>,
         children: [
@@ -15,6 +16,8 @@ export const router = createBrowserRouter([
             {path: 'documents', element: <DocumentsPage/>},
             {path: 'documents/:id', element: <DocumentDetailPage/>},
             {path: 'chat', element: <ChatPage/>},
+            {path: 'evaluation', element: <EvaluationListPage/>},
+            {path: 'evaluation/runs/:id', element: <EvaluationDetailPage/>},
         ],
     },
 ])

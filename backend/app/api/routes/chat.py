@@ -2,7 +2,11 @@ from collections.abc import AsyncIterator
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Response
-from fastapi.sse import EventSourceResponse, ServerSentEvent
+
+try:
+    from fastapi.sse import EventSourceResponse, ServerSentEvent
+except ImportError:
+    from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 
 from app.api.deps import DbSession
 from app.api.schemas.chat import (
