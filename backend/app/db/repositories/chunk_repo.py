@@ -15,10 +15,33 @@ class ChunkStats:
 from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, ColumnElement, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+
 from app.db.models import Document, DocumentChunk
+from app.services.permission_service import WILDCARD_PERMISSION_TAG
+
+
+def _permission_where(
+    permission_tags: list[str] | None,
+) -> ColumnElement[bool] | None:
+    """构造文档可见性 WHERE 条件。
+
+    - None:调用方(评测/启动种子)显式不限制
+    - 含"*":admin 通配,不加条件
+    - 其他:'空权限标签视为公开' OR '数组重叠'
+
+    返回 None 表示不附加任何额外 WHERE;非 None 时由调用方 .where() 拼上。
+    """
+    if permission_tags is None:
+        return None
+    if WILDCARD_PERMISSION_TAG in permission_tags:
+        return None
+    return or_(
+        func.cardinality(Document.permission_tags) == 0,
+        Document.permission_tags.op("&&")(permission_tags),
+    )
 
 
 class DocumentChunkRepository:
@@ -97,20 +120,30 @@ class DocumentChunkRepository:
             self,
             query_embedding: list[float],
             top_k: int,
+            *,
+            permission_tags: list[str] | None = None,
     ) -> list[tuple[DocumentChunk, float]]:
-        """按 cosine 距离做 Top - K 向量检索。
+        """按 cosine 距离做 Top-K 向量检索。
 
         - 仅检索状态为 ready 的文档(避免拿到尚未完成入库的脏 chunk)
         - 返回(chunk, distance) 列表, distance 越小越相似(pgvector cosine_distance)
         - 用 selectinload 把所属 Document 一并加载, 方便上层直接读 document.name
           而不会再发 N 次 lazyload 查询
+        - 可选按 permission_tags 过滤文档可见性
         """
-        distance = DocumentChunk.embedding.cosine_distance(query_embedding)
+        distance_expr = DocumentChunk.embedding.cosine_distance(query_embedding)
+        conditions: list[ColumnElement[bool]] = [
+            Document.status == "ready",
+        ]
+        perm_where = _permission_where(permission_tags)
+        if perm_where is not None:
+            conditions.append(perm_where)
+
         stmt = (
-            select(DocumentChunk, distance.label("distance"))
+            select(DocumentChunk, distance_expr.label("distance"))
             .join(Document, Document.id == DocumentChunk.document_id)
-            .where(Document.status == "ready")
-            .order_by(distance.asc())
+            .where(and_(*conditions))
+            .order_by(distance_expr.asc())
             .limit(top_k)
             .options(selectinload(DocumentChunk.document))
         )
@@ -121,6 +154,8 @@ class DocumentChunkRepository:
             self,
             query: str,
             top_k: int,
+            *,
+            permission_tags: list[str] | None = None,
     ) -> list[tuple[DocumentChunk, float]]:
         """中文全文检索 Top-K: plainto_tsquery + ts_rank。
 
@@ -129,16 +164,22 @@ class DocumentChunkRepository:
           ("差旅 报销"和"差旅报销"都会切成同一组 token)
         - 仅命中 status='ready' 文档,避免拿到尚未完成入库的脏 chunk
         - 返回(chunk, ts_rank) 列表, ts_rank 越大越相关
+        - 可选按 permission_tags 过滤文档可见性
         """
         tsquery = func.plainto_tsquery("chinese_zh", query)
         rank_expr = func.ts_rank(DocumentChunk.content_tsv, tsquery)
+        conditions: list[ColumnElement[bool]] = [
+            Document.status == "ready",
+            DocumentChunk.content_tsv.op("@@")(tsquery),
+        ]
+        perm_where = _permission_where(permission_tags)
+        if perm_where is not None:
+            conditions.append(perm_where)
+
         stmt = (
             select(DocumentChunk, rank_expr.label("rank"))
             .join(Document, Document.id == DocumentChunk.document_id)
-            .where(
-                Document.status == "ready",
-                DocumentChunk.content_tsv.op("@@")(tsquery),
-            )
+            .where(and_(*conditions))
             .order_by(rank_expr.desc())
             .limit(top_k)
             .options(selectinload(DocumentChunk.document))

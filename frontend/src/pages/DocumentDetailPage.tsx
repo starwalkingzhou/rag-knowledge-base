@@ -6,6 +6,8 @@ import {
     Card,
     Descriptions,
     Empty,
+    Form,
+    Input,
     List,
     Modal,
     Pagination,
@@ -21,6 +23,7 @@ import {
     ArrowLeftOutlined,
     DeleteOutlined,
     DownloadOutlined,
+    EditOutlined,
     EyeOutlined,
     RedoOutlined,
 } from '@ant-design/icons'
@@ -32,6 +35,7 @@ import {
     getDocumentChunk,
     listDocumentChunks,
     retryDocument,
+    updateDocumentPermissionTags,
 } from '@/client/sdk.gen'
 import type {
     DocumentChunkDetail,
@@ -50,6 +54,8 @@ import {
     isMarkdownMime,
     isPdfMime,
 } from '@/utils/documentFile'
+import {useAuthStore} from '@/store/authStore'
+import {PermissionTagsField} from '@/components/PermissionTagsField'
 import remarkGfm from 'remark-gfm'
 import {gfmComponents} from '@/components/markdownComponents'
 
@@ -67,9 +73,11 @@ export function DocumentDetailPage() {
     const {id = ''} = useParams<{ id: string }>()
     const navigate = useNavigate()
     const queryClient = useQueryClient()
+    const isAdmin = useAuthStore(s => Boolean(s.user?.isAdmin))
 
     const [chunkPage, setChunkPage] = useState(1)
     const [activeChunkId, setActiveChunkId] = useState<string | null>(null)
+    const [permModalOpen, setPermModalOpen] = useState(false)
 
     const docQuery = useQuery({
         queryKey: ['documents', 'detail', id],
@@ -138,6 +146,21 @@ export function DocumentDetailPage() {
         },
     })
 
+    const permUpdateMutation = useMutation({
+        mutationFn: async (tags: string[]) => {
+            const res = await updateDocumentPermissionTags({
+                path: {document_id: id},
+                body: {permission_tags: tags},
+            })
+            return res.data!
+        },
+        onSuccess: () => {
+            message.success('权限标签已更新')
+            queryClient.invalidateQueries({queryKey: ['documents']})
+            setPermModalOpen(false)
+        },
+    })
+
     const previewUrl = useMemo(() => buildDocumentFileUrl(id, {download: false}), [id])
     const downloadUrl = useMemo(() => buildDocumentFileUrl(id, {download: true}), [id])
 
@@ -160,6 +183,14 @@ export function DocumentDetailPage() {
                 {supportsInlinePreview ? (
                     <Button icon={<EyeOutlined/>} href={previewUrl} target="_blank" rel="noreferrer">
                         新窗口打开
+                    </Button>
+                ) : null}
+                {isAdmin ? (
+                    <Button
+                        icon={<EditOutlined/>}
+                        onClick={() => setPermModalOpen(true)}
+                    >
+                        编辑权限标签
                     </Button>
                 ) : null}
                 {canRetry ? (
@@ -214,6 +245,19 @@ export function DocumentDetailPage() {
                 <Descriptions.Item label="更新时间">
                     {new Date(doc.updated_at).toLocaleString('zh-CN')}
                 </Descriptions.Item>
+                <Descriptions.Item label="权限标签">
+                    {(doc.permission_tags ?? []).length === 0 ? (
+                        <Tag>公开</Tag>
+                    ) : (
+                        <Space size={4} wrap>
+                            {(doc.permission_tags ?? []).map(t => (
+                                <Tag key={t} color={t === '*' ? 'gold' : 'blue'}>
+                                    {t}
+                                </Tag>
+                            ))}
+                        </Space>
+                    )}
+                </Descriptions.Item>
             </Descriptions>
             <Card title="原文预览" style={{marginBottom: 24}}>
                 <PreviewArea mimeType={doc.mime_type} previewUrl={previewUrl}/>
@@ -241,7 +285,68 @@ export function DocumentDetailPage() {
                     <ChunkDetailBody chunk={chunkDetailQuery.data}/>
                 ) : null}
             </Modal>
+            <PermissionTagsEditModal
+                open={permModalOpen}
+                onClose={() => setPermModalOpen(false)}
+                tags={doc.permission_tags ?? []}
+                onSubmit={tags => permUpdateMutation.mutate(tags)}
+                submitting={permUpdateMutation.isPending}
+            />
         </div>
+    )
+}
+
+interface PermissionTagsEditModalProps {
+    open: boolean
+    onClose: () => void
+    tags: string[]
+    onSubmit: (tags: string[]) => void
+    submitting: boolean
+}
+
+function PermissionTagsEditModal({
+                                     open,
+                                     onClose,
+                                     tags,
+                                     onSubmit,
+                                     submitting,
+                                 }: PermissionTagsEditModalProps) {
+    const [form] = Form.useForm<{permission_tags: string[]}>()
+
+    return (
+        <Modal
+            title="编辑权限标签"
+            open={open}
+            onCancel={() => {
+                form.resetFields()
+                onClose()
+            }}
+            onOk={async () => {
+                try {
+                    const values = await form.validateFields()
+                    onSubmit(values.permission_tags)
+                } catch {
+                    // 校验失败
+                }
+            }}
+            destroyOnHidden
+            confirmLoading={submitting}
+            okText="保存"
+        >
+            <Form
+                form={form}
+                layout="vertical"
+                initialValues={{permission_tags: tags}}
+            >
+                <Form.Item
+                    name="permission_tags"
+                    label="权限标签"
+                    extra="留空视为公开(所有登录用户可见);填入后仅拥有匹配标签的角色可见"
+                >
+                    <PermissionTagsField placeholder="例如: hr、sales、public"/>
+                </Form.Item>
+            </Form>
+        </Modal>
     )
 }
 
@@ -275,15 +380,20 @@ function formatSize(size: number): string {
     return `${(size / 1024 / 1024).toFixed(2)} MB`
 }
 
-function MarkdownPreview({url}: { url: string }) {
+function MarkdownPreview({url}: {url: string}) {
     const [content, setContent] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
+    const token = useAuthStore(s => s.token)
 
     useEffect(() => {
             let cancelled = false
             setContent(null)
             setError(null)
-            fetch(url)
+            const headers: Record<string, string> = {}
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`
+            }
+            fetch(url, {headers})
                 .then(async (r) => {
                     if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
                     return r.text()
@@ -297,7 +407,7 @@ function MarkdownPreview({url}: { url: string }) {
             return () => {
                 cancelled = true
             }
-        }, [url]
+        }, [url, token]
     )
 
     if (error) return <Alert type="error" message="Markdown 加载失败" description={error}/>

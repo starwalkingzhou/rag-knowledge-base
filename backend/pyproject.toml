@@ -24,4 +24,6 @@ dependencies = [
     "langsmith>=0.8.3",
     "ragas>=0.4.3",
     "langchain-community<0.4.2",
+    "bcrypt>=5.0.0",
+    "pyjwt>=2.13.0",
 ]

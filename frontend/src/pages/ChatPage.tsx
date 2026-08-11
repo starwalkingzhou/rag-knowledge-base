@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {useEffect, useMemo, useRef, useState} from "react";
 import {
   Alert,
   Avatar,
@@ -39,12 +39,13 @@ import { AgentStepsPanel } from "@/components/AgentStepsPanel";
 import { QueryRoutePanel } from "@/components/QueryRoutePanel";
 import { TraceIdPanel } from "@/components/TraceIdPanel";
 import { formatApiError } from "@/utils/errors";
+import { useAuthStore } from "@/store/authStore";
 
 const { Text } = Typography;
 const { TextArea } = Input;
 const { Sider, Content } = Layout;
 
-const STORAGE_KEY = "rag.chat.conversation_id";
+const STORAGE_KEY_PREFIX = "rag.chat.conversation_id";
 /** 与后端 REFUSAL_ANSWER 文案一致；用来判定历史消息是否拒答 */
 const REFUSAL_ANSWER =
   "抱歉,知识库中没有找到与该问题相关的可靠依据。";
@@ -86,8 +87,10 @@ function fromServerMessage(m: MessageRead): UiMessage {
 
 export function ChatPage() {
   const queryClient = useQueryClient();
+  const userId = useAuthStore((s) => s.user?.id);
+  const storageKey = userId ? `${STORAGE_KEY_PREFIX}.${userId}` : null;
   const [conversationId, setConversationId] = useState<string | null>(() =>
-    localStorage.getItem(STORAGE_KEY),
+    storageKey ? localStorage.getItem(storageKey) : null,
   );
   const [draft, setDraft] = useState("");
   // 流式过程中的临时消息(只放在前端 state,结束后由历史接口回填正式 id)
@@ -103,7 +106,9 @@ export function ChatPage() {
       return res.data!;
     },
     onSuccess: async (conversation) => {
-      localStorage.setItem(STORAGE_KEY, conversation.id);
+      if (storageKey) {
+        localStorage.setItem(storageKey, conversation.id);
+      }
       setConversationId(conversation.id);
       setPendingMessages([]);
       // 失效旧的历史缓存 + 刷新侧栏列表
@@ -122,7 +127,9 @@ export function ChatPage() {
     abortRef.current?.abort();
     setPendingMessages([]);
     setIsStreaming(false);
-    localStorage.setItem(STORAGE_KEY, id);
+    if (storageKey) {
+      localStorage.setItem(storageKey, id);
+    }
     setConversationId(id);
   };
 
@@ -131,7 +138,9 @@ export function ChatPage() {
     abortRef.current?.abort();
     setPendingMessages([]);
     setIsStreaming(false);
-    localStorage.removeItem(STORAGE_KEY);
+    if (storageKey) {
+      localStorage.removeItem(storageKey);
+    }
     setConversationId(null);
     queryClient.removeQueries({ queryKey: ["conversation", deletedId] });
   };

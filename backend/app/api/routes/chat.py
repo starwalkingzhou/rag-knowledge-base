@@ -8,7 +8,7 @@ try:
 except ImportError:
     from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 
-from app.api.deps import DbSession
+from app.api.deps import CurrentUser, DbSession
 from app.api.schemas.chat import (
     ChatRequest,
     ConversationCreate,
@@ -32,9 +32,12 @@ router = APIRouter(prefix="/conversations", tags=["chat"])
 async def create_conversation(
         payload: ConversationCreate,
         session: DbSession,
+        user: CurrentUser,
 ) -> ConversationRead:
     service = ChatService(session)
-    conversation = await service.create_conversation(title=payload.title)
+    conversation = await service.create_conversation(
+        title=payload.title, user_id=user.id
+    )
     return ConversationRead.model_validate(conversation)
 
 
@@ -45,12 +48,15 @@ async def create_conversation(
     summary="按更新时间倒序分页列出所有会话",
 )
 async def list_conversations(
+    user: CurrentUser,
     session: DbSession,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> ConversationPage:
     service = ChatService(session)
-    items, total = await service.list_conversations(page=page, page_size=page_size)
+    items, total = await service.list_conversations(
+        page=page, page_size=page_size, user_id=user.id
+    )
     return ConversationPage(
         items=[
             ConversationListItem(
@@ -74,11 +80,14 @@ async def list_conversations(
 )
 async def get_conversation(
         conversation_id: UUID,
+        user: CurrentUser,
         session: DbSession,
 ) -> ConversationDetail:
     """返回会话本身 + 全部历史消息(含引用)。"""
     service = ChatService(session)
-    conversation, messages = await service.list_messages(conversation_id)
+    conversation, messages = await service.list_messages(
+        conversation_id, user_id=user.id
+    )
     return ConversationDetail(
         conversation=ConversationRead.model_validate(conversation),
         messages=[MessageRead.from_orm_message(m) for m in messages],
@@ -93,10 +102,11 @@ async def get_conversation(
 )
 async def delete_conversation(
     conversation_id: UUID,
+    user: CurrentUser,
     session: DbSession,
 ) -> Response:
     service = ChatService(session)
-    await service.delete_conversation(conversation_id)
+    await service.delete_conversation(conversation_id, user_id=user.id)
     return Response(status_code=204)
 
 
@@ -108,6 +118,7 @@ async def delete_conversation(
 async def stream_chat(
         conversation_id: UUID,
         payload: ChatRequest,
+        user: CurrentUser,
         session: DbSession,
 ) -> AsyncIterator[ServerSentEvent]:
     """SSE 流式问答。
@@ -116,7 +127,9 @@ async def stream_chat(
     任何阶段出错改 yield error。前端用 @microsoft/fetch-event-source 接。
     """
     service = ChatService(session)
-    async for sse_event in service.stream_answer(conversation_id, payload.question):
+    async for sse_event in service.stream_answer(
+        conversation_id, payload.question, current_user=user
+    ):
         yield ServerSentEvent(
             data=sse_event["data"],
             event=sse_event["event"],

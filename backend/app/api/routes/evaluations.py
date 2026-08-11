@@ -1,8 +1,8 @@
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response
 
-from app.api.deps import DbSession
+from app.api.deps import DbSession, get_current_admin
 from app.api.schemas.evaluations import (
     BadCaseCategoryValue,
     DatasetInfo,
@@ -17,7 +17,11 @@ from app.api.schemas.evaluations import (
 )
 from app.services.evaluation_service import EvaluationService, execute_evaluation_run
 
-router = APIRouter(prefix="/evaluations", tags=["evaluations"])
+router = APIRouter(
+    prefix="/evaluations",
+    tags=["evaluations"],
+    dependencies=[Depends(get_current_admin)],
+)
 
 
 @router.get(

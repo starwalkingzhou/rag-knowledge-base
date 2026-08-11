@@ -19,8 +19,10 @@ class KeywordRetriever:
         self.chunk_repo = DocumentChunkRepository(session)
 
     @traceable(name="KeywordRetriever.search", run_type="retriever")
-    async def search(self, query: str, top_k: int) -> list[RetrievedChunk]:
-        rows = await self.chunk_repo.keyword_search(query, top_k)
+    async def search(
+        self, query: str, top_k: int, permission_tags: list[str] | None = None
+    ) -> list[RetrievedChunk]:
+        rows = await self.chunk_repo.keyword_search(query, top_k, permission_tags=permission_tags)
         return [
             RetrievedChunk(
                 chunk_id=chunk.id,

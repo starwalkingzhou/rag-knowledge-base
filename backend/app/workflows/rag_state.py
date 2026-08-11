@@ -10,6 +10,10 @@ class RAGState(TypedDict, total=False):
     # 输入
     conversation_id: UUID
     question: str
+    # 用户有效权限标签，由 service 在进图前注入
+    # 含 "*" 时检索 SQL 不加权限过滤（admin 视角）；
+    # 评测路径传 ["*"] 让评测不被权限拦住
+    permissions: list[str]
 
     # load_context 产出
     chat_history: list[Message]

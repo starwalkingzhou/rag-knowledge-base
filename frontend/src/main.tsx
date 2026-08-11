@@ -5,8 +5,12 @@ import zhCN from 'antd/locale/zh_CN'
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query'
 import {RouterProvider} from 'react-router-dom'
 import {router} from '@/routes'
+import {useAuthStore} from '@/store/authStore'
 import 'antd/dist/reset.css'
 import '@/api/client'
+
+// 在 React 渲染前同步 hydrate, 避免首屏闪登录页
+useAuthStore.getState().hydrate()
 
 const queryClient = new QueryClient({
     defaultOptions: {

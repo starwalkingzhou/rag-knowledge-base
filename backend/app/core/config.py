@@ -77,6 +77,19 @@ class Settings(BaseSettings):
     # RRF 平滑常数 k:越小越偏向高排名条目;越大越平滑
     rrf_k: int = 60
 
+    # ==== 认证 ====
+    # JWT 签名密钥；为空时启动打 ERROR 警告但不阻断（教学场景，避免学员忘配跑不起来）
+    # 生产部署务必改成足够长的随机串
+    jwt_secret: str = ""
+    jwt_algorithm: str = "HS256"
+    # token 默认 24 小时过期
+    jwt_expire_minutes: int = 1440
+
+    # 首次启动种子管理员账号；库内已有用户时跳过
+    default_admin_username: str = "admin"
+    default_admin_password: str = "admin"
+    default_admin_display_name: str = "管理员"
+
     # ===== Agentic RAG =====
     # 关掉后图退化为单轮检索，作为单轮 vs agent 循环的对比开关
     agent_loop_enabled: bool = True
