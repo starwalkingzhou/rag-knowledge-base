@@ -26,4 +26,7 @@ dependencies = [
     "langchain-community<0.4.2",
     "bcrypt>=5.0.0",
     "pyjwt>=2.13.0",
+    "celery[redis]>=5.6.3",
+    "redis>=6.4.0",
+    "redisvl>=0.25.1",
 ]

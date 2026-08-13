@@ -6,7 +6,9 @@ from uuid import UUID
 from fastapi import Depends, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.exceptions import PermissionDeniedError, UnauthorizedError
+from app.core.rate_limiter import get_rate_limiter
 from app.core.security import decode_access_token
 from app.db.models import User, UserStatus
 from app.db.repositories.user_repo import UserRepository
@@ -60,5 +62,19 @@ async def get_current_admin(
     return user
 
 
+async def enforce_rate_limit(
+    user: Annotated[User, Depends(get_current_user)],
+) -> None:
+    """基于 user_id 的滑动窗口限流，每分钟最多 RATE_LIMIT_PER_MINUTE 次。
+
+    挂在写接口（chat / 上传 / 重新索引）；读接口（list / get）不要挂，
+    否则前端 3 秒轮询文档列表会被误伤。
+    """
+    if not settings.rate_limit_enabled:
+        return
+    await get_rate_limiter().check(f"user:{user.id}")
+
+
 CurrentUser = Annotated[User, Depends(get_current_user)]
 CurrentAdmin = Annotated[User, Depends(get_current_admin)]
+RateLimited = Annotated[None, Depends(enforce_rate_limit)]

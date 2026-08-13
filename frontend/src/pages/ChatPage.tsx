@@ -66,6 +66,8 @@ interface UiMessage {
   error?: string | null;
   traceId?: string | null;
   traceUrl?: string | null;
+  /** 语义缓存, true 表示本条 assistant 消息来自缓存命中 */
+  cacheHit?: boolean;
 }
 
 function fromServerMessage(m: MessageRead): UiMessage {
@@ -82,6 +84,7 @@ function fromServerMessage(m: MessageRead): UiMessage {
     status: "done",
     traceId: m.trace_id ?? null,
     traceUrl: m.trace_url ?? null,
+    cacheHit: Boolean(m.cache_hit),
   };
 }
 
@@ -241,6 +244,7 @@ export function ChatPage() {
                 ...prev,
                 traceId: event.traceId,
                 traceUrl: event.traceUrl,
+                cacheHit: event.cacheHit,
               }));
               break;
             case "query_route":
@@ -446,7 +450,7 @@ function createMarkdownComponents(onCitationClick: (n: number) => void) {
   };
 }
 
-/** 气泡顶部状态条:拒答提示 / 校验结果 Tag。
+/** 气泡顶部状态条:拒答提示 / 缓存命中 / 校验结果 Tag。
  * 拒答提示优先(用户最关心答案是否可靠);拒答场景不再单独弹 verify Alert,避免双重警告。
  */
 function AssistantHeader({ message }: { message: UiMessage }) {
@@ -457,7 +461,7 @@ function AssistantHeader({ message }: { message: UiMessage }) {
         showIcon
         message="未在知识库中找到可靠依据"
         description={
-          message.verifyResult?.verified === false
+          message.verifyResult && message.verifyResult.verified === false
             ? `答案校验未通过: ${message.verifyResult.reason ?? "缺乏引用支撑"}, 已替换为拒答提示`
             : undefined
         }
@@ -465,14 +469,24 @@ function AssistantHeader({ message }: { message: UiMessage }) {
       />
     );
   }
-  if (message.verifyResult?.verified === true) {
-    return (
-      <div style={{ marginBottom: 8 }}>
-        <Tag color="green">已校验</Tag>
-      </div>
+  // 缓存命中与已校验是并列的状态指示，不互斥（命中场景下没有 verify，但允许同时展示）
+  const tags: React.ReactNode[] = [];
+  if (message.cacheHit) {
+    tags.push(
+      <Tag key="cache" color="cyan">
+        缓存命中
+      </Tag>,
     );
   }
-  return null;
+  if (message.verifyResult?.verified === true) {
+    tags.push(
+      <Tag key="verified" color="green">
+        已校验
+      </Tag>,
+    );
+  }
+  if (tags.length === 0) return null;
+  return <div style={{ marginBottom: 8 }}>{tags}</div>;
 }
 
 interface MessageBubbleProps {

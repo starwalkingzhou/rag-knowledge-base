@@ -8,6 +8,8 @@ export interface ChatStartEvent {
     traceId: string | null
     /** LangSmith UI 跳转 URL; 后端按 LANGSMITH_RUN_URL_PREFIX 拼好下发，未配置为 null */
     traceUrl: string | null
+    /** 语义缓存: true 表示本次回答来自缓存命中，跳过了图与 LLM */
+    cacheHit: boolean
 }
 
 export interface ChatQueryRouteEvent {
@@ -120,6 +122,7 @@ export async function streamChat({
                             type: 'start',
                             traceId: data.trace_id ?? null,
                             traceUrl: data.trace_url ?? null,
+                            cacheHit: Boolean(data.cache_hit),
                         })
                         break
                     case 'query_route':

@@ -124,6 +124,22 @@ class Settings(BaseSettings):
     # 仅配置了才发给前端做跳转链接。
     langsmith_run_url_prefix: str = ""
 
+    # ===== Redis (语义缓存 / 限流 / Celery broker, 第 12 章引入) =====
+    # 应用直接接客户端，不同 db 索引让 Celery broker / backend 互不干扰
+    redis_url: str = "redis://localhost:6379/0"
+    celery_broker_url: str = "redis://localhost:6379/1"
+    celery_result_backend: str = "redis://localhost:6379/2"
+
+    # ===== 语义缓存（第 12 章）=====
+    semantic_cache_enabled: bool = True
+    semantic_cache_ttl_seconds: int = 3600
+    # RedisVL 内部用「余弦距离 = 1 - 余弦相似度」做 KNN 查询，转换在 service 层完成
+    semantic_cache_min_similarity: float = 0.92
+
+    # ===== 滑动窗口限流（第 12 章）=====
+    rate_limit_enabled: bool = True
+    rate_limit_per_minute: int = 60
+
     @property
     def effective_rerank_api_key(self) -> str:
         """Rerank 与 chat 通常共用同一 DashScope key;单独配了就优先用单独的。"""

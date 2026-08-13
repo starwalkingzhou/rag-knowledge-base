@@ -53,3 +53,11 @@ class ConflictError(AppException):
     code = "conflict"
     message = "资源冲突"
     http_status = HTTPStatus.CONFLICT
+
+
+class RateLimitedError(AppException):
+    """滑动窗口限流命中。"""
+
+    code = "rate_limited"
+    message = "请求过于频繁，请稍后再试"
+    http_status = HTTPStatus.TOO_MANY_REQUESTS

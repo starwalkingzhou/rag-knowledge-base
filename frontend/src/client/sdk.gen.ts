@@ -2,7 +2,7 @@
 
 import { type Client, type ClientMeta, formDataBodySerializer, type Options as Options2, type RequestResult, type ServerSentEventsResult, type TDataShape } from './client';
 import { client } from './client.gen';
-import type { AssignUserRolesData, AssignUserRolesErrors, AssignUserRolesResponses, CreateConversationData, CreateConversationErrors, CreateConversationResponses, CreateEvaluationRunData, CreateEvaluationRunErrors, CreateEvaluationRunResponses, CreateRoleData, CreateRoleErrors, CreateRoleResponses, CreateUserData, CreateUserErrors, CreateUserResponses, DeleteConversationData, DeleteConversationErrors, DeleteConversationResponses, DeleteDocumentData, DeleteDocumentErrors, DeleteDocumentResponses, DeleteEvaluationRunData, DeleteEvaluationRunErrors, DeleteEvaluationRunResponses, DeleteRoleData, DeleteRoleErrors, DeleteRoleResponses, DeleteUserData, DeleteUserErrors, DeleteUserResponses, DownloadDocumentData, DownloadDocumentErrors, DownloadDocumentResponses, GetConversationData, GetConversationErrors, GetConversationResponses, GetCurrentUserData, GetCurrentUserErrors, GetCurrentUserResponses, GetDocumentChunkData, GetDocumentChunkErrors, GetDocumentChunkResponses, GetDocumentData, GetDocumentErrors, GetDocumentResponses, GetEvaluationItemData, GetEvaluationItemErrors, GetEvaluationItemResponses, GetEvaluationRunData, GetEvaluationRunErrors, GetEvaluationRunResponses, GetRoleData, GetRoleErrors, GetRoleResponses, GetUserData, GetUserErrors, GetUserResponses, HealthAppData, HealthAppResponses, HealthCosData, HealthCosResponses, HealthDbData, HealthDbResponses, ListConversationsData, ListConversationsErrors, ListConversationsResponses, ListDocumentChunksData, ListDocumentChunksErrors, ListDocumentChunksResponses, ListDocumentsData, ListDocumentsErrors, ListDocumentsResponses, ListEvaluationDatasetsData, ListEvaluationDatasetsErrors, ListEvaluationDatasetsResponses, ListEvaluationItemsData, ListEvaluationItemsErrors, ListEvaluationItemsResponses, ListEvaluationRunsData, ListEvaluationRunsErrors, ListEvaluationRunsResponses, ListRolesData, ListRolesErrors, ListRolesResponses, ListUsersData, ListUsersErrors, ListUsersResponses, LoginData, LoginErrors, LoginResponses, RetryDocumentData, RetryDocumentErrors, RetryDocumentResponses, StreamChatData, StreamChatErrors, StreamChatResponses, UpdateDocumentPermissionTagsData, UpdateDocumentPermissionTagsErrors, UpdateDocumentPermissionTagsResponses, UpdateEvaluationItemData, UpdateEvaluationItemErrors, UpdateEvaluationItemResponses, UpdateRoleData, UpdateRoleErrors, UpdateRoleResponses, UpdateUserData, UpdateUserErrors, UpdateUserResponses, UploadDocumentData, UploadDocumentErrors, UploadDocumentResponses } from './types.gen';
+import type { AssignUserRolesData, AssignUserRolesErrors, AssignUserRolesResponses, CreateConversationData, CreateConversationErrors, CreateConversationResponses, CreateEvaluationRunData, CreateEvaluationRunErrors, CreateEvaluationRunResponses, CreateRoleData, CreateRoleErrors, CreateRoleResponses, CreateUserData, CreateUserErrors, CreateUserResponses, DeleteConversationData, DeleteConversationErrors, DeleteConversationResponses, DeleteDocumentData, DeleteDocumentErrors, DeleteDocumentResponses, DeleteEvaluationRunData, DeleteEvaluationRunErrors, DeleteEvaluationRunResponses, DeleteRoleData, DeleteRoleErrors, DeleteRoleResponses, DeleteUserData, DeleteUserErrors, DeleteUserResponses, DownloadDocumentData, DownloadDocumentErrors, DownloadDocumentResponses, GetConversationData, GetConversationErrors, GetConversationResponses, GetCurrentUserData, GetCurrentUserErrors, GetCurrentUserResponses, GetDocumentChunkData, GetDocumentChunkErrors, GetDocumentChunkResponses, GetDocumentData, GetDocumentErrors, GetDocumentResponses, GetEvaluationItemData, GetEvaluationItemErrors, GetEvaluationItemResponses, GetEvaluationRunData, GetEvaluationRunErrors, GetEvaluationRunResponses, GetRoleData, GetRoleErrors, GetRoleResponses, GetUserData, GetUserErrors, GetUserResponses, HealthAppData, HealthAppResponses, HealthCosData, HealthCosResponses, HealthDbData, HealthDbResponses, ListConversationsData, ListConversationsErrors, ListConversationsResponses, ListDocumentChunksData, ListDocumentChunksErrors, ListDocumentChunksResponses, ListDocumentsData, ListDocumentsErrors, ListDocumentsResponses, ListEvaluationDatasetsData, ListEvaluationDatasetsErrors, ListEvaluationDatasetsResponses, ListEvaluationItemsData, ListEvaluationItemsErrors, ListEvaluationItemsResponses, ListEvaluationRunsData, ListEvaluationRunsErrors, ListEvaluationRunsResponses, ListRolesData, ListRolesErrors, ListRolesResponses, ListUsersData, ListUsersErrors, ListUsersResponses, LoginData, LoginErrors, LoginResponses, ReindexDocumentData, ReindexDocumentErrors, ReindexDocumentResponses, RetryDocumentData, RetryDocumentErrors, RetryDocumentResponses, StreamChatData, StreamChatErrors, StreamChatResponses, UpdateDocumentPermissionTagsData, UpdateDocumentPermissionTagsErrors, UpdateDocumentPermissionTagsResponses, UpdateEvaluationItemData, UpdateEvaluationItemErrors, UpdateEvaluationItemResponses, UpdateRoleData, UpdateRoleErrors, UpdateRoleResponses, UpdateUserData, UpdateUserErrors, UpdateUserResponses, UploadDocumentData, UploadDocumentErrors, UploadDocumentResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -150,7 +150,7 @@ export const listDocuments = <ThrowOnError extends boolean = false>(options?: Op
 /**
  * Upload Document
  *
- * 上传文档:写入 COS、落库后立即返回,解析与向量化通过 BackgroundTasks 异步进行。
+ * 上传文档:写入 COS、落库后立即返回,解析与向量化由 Celery worker 异步进行。
  */
 export const uploadDocument = <ThrowOnError extends boolean = false>(options: Options<UploadDocumentData, ThrowOnError>): RequestResult<UploadDocumentResponses, UploadDocumentErrors, ThrowOnError> => (options.client ?? client).post<UploadDocumentResponses, UploadDocumentErrors, ThrowOnError>({
     ...formDataBodySerializer,
@@ -176,6 +176,21 @@ export const getDocument = <ThrowOnError extends boolean = false>(options: Optio
  * Retry Document
  */
 export const retryDocument = <ThrowOnError extends boolean = false>(options: Options<RetryDocumentData, ThrowOnError>): RequestResult<RetryDocumentResponses, RetryDocumentErrors, ThrowOnError> => (options.client ?? client).post<RetryDocumentResponses, RetryDocumentErrors, ThrowOnError>({ url: '/api/documents/{document_id}/retry', ...options });
+
+/**
+ * Reindex Document
+ *
+ * 上传新版本并触发按 chunk_hash 对齐的增量重建。
+ */
+export const reindexDocument = <ThrowOnError extends boolean = false>(options: Options<ReindexDocumentData, ThrowOnError>): RequestResult<ReindexDocumentResponses, ReindexDocumentErrors, ThrowOnError> => (options.client ?? client).post<ReindexDocumentResponses, ReindexDocumentErrors, ThrowOnError>({
+    ...formDataBodySerializer,
+    url: '/api/documents/{document_id}/reindex',
+    ...options,
+    headers: {
+        'Content-Type': null,
+        ...options.headers
+    }
+});
 
 /**
  * Download Document

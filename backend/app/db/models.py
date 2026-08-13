@@ -18,6 +18,31 @@ class DocumentStatus(str, Enum):
     FAILED = "failed"
 
 
+class IngestionTaskType(str, Enum):
+    """入库任务类型。
+
+    ingest: 首次入库（解析 → 切分 → 全量 embedding → 写入）
+    reindex: 增量重建（按 chunk_hash 对齐，仅对变更 chunk 重 embedding）
+    """
+
+    INGEST = "ingest"
+    REINDEX = "reindex"
+
+
+class IngestionTaskStatus(str, Enum):
+    """Celery 任务生命周期。
+
+    pending: 已写入表，尚未被 worker 领取
+    running: worker 已开始执行
+    success / failed: 终态
+    """
+
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+
+
 class UserStatus(str, Enum):
     """用户启用状态。"""
 
@@ -153,6 +178,11 @@ class Document(Base):
 
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # 文档版本号：每次 reindex 成功后 +1，前端列表可见，标识「内容已变更」
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+
     # 空数组视为"公开"，任意登录用户可见可检索，
     # 用于兼容之前上传的存量文档。
     # 非空数组与用户有效权限标签做数组重叠匹配（admin 持 "*" 通配）。
@@ -178,6 +208,12 @@ class Document(Base):
 
     chunks: Mapped[list["DocumentChunk"]] = relationship(
         back_populates="document", cascade="all, delete-orphan", passive_deletes=True
+    )
+    ingestion_tasks: Mapped[list["IngestionTask"]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="IngestionTask.created_at.desc()",
     )
 
 
@@ -438,3 +474,41 @@ class EvaluationItem(Base):
     )
 
     run: Mapped[EvaluationRun] = relationship(back_populates="items")
+
+
+class IngestionTask(Base):
+    """文档入库任务生命周期跟踪。
+
+    Celery worker 领取前先写一条 pending；worker 再按生命周期更新
+    running → success / failed。前端通过 documents 接口的 latest_task
+    轮询 progress_done / progress_total 与 error_message。
+    """
+
+    __tablename__ = "ingestion_tasks"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    document_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    task_type: Mapped[IngestionTaskType] = mapped_column(String(16), nullable=False)
+    status: Mapped[IngestionTaskStatus] = mapped_column(
+        String(16), nullable=False, default=IngestionTaskStatus.PENDING
+    )
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # reindex 时 total=新增 chunk 数，done=已 embedding 批次数；
+    # ingest 时 total=切分后的 chunk 总数
+    progress_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_done: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    document: Mapped[Document] = relationship(back_populates="ingestion_tasks")

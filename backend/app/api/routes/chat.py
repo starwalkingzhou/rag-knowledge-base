@@ -8,7 +8,7 @@ try:
 except ImportError:
     from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, RateLimited
 from app.api.schemas.chat import (
     ChatRequest,
     ConversationCreate,
@@ -119,6 +119,7 @@ async def stream_chat(
         conversation_id: UUID,
         payload: ChatRequest,
         user: CurrentUser,
+        _rate_limit: RateLimited,
         session: DbSession,
 ) -> AsyncIterator[ServerSentEvent]:
     """SSE 流式问答。

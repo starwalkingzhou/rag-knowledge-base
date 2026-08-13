@@ -228,6 +228,12 @@ export function DocumentsPage() {
         {title: '类型', dataIndex: 'mime_type', width: 220, ellipsis: true},
         {title: '大小', dataIndex: 'size', width: 110, render: formatSize},
         {
+            title: '版本',
+            dataIndex: 'version',
+            width: 80,
+            render: (version: number) => <Tag color="purple">v{version ?? 1}</Tag>,
+        },
+        {
             title: '权限标签',
             dataIndex: 'permission_tags',
             width: 200,
