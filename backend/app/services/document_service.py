@@ -1,5 +1,7 @@
 import hashlib
 from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import PurePath
 from uuid import UUID
 
@@ -69,6 +71,19 @@ _DELETABLE_STATUSES = frozenset(
     {DocumentStatus.READY, DocumentStatus.FAILED, DocumentStatus.UPLOADING}
 )
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class KnowledgeBaseStats:
+    """知识库整体规模快照，按调用者权限范围统计。
+
+    chunk_count 仅计入 status='ready' 的文档，与检索可见性一致；
+    last_indexed_at 取最近一次 ready 文档的 updated_at（含 reindex 后的刷新）。
+    """
+
+    document_count: int
+    chunk_count: int
+    last_indexed_at: datetime | None
 
 
 class DocumentService:
@@ -158,6 +173,29 @@ class DocumentService:
     ) -> tuple[list[Document], int]:
         return await self.repo.list_paginated(
             page, page_size, status=status, permission_tags=permission_tags
+        )
+
+    async def get_stats(
+        self,
+        *,
+        permission_tags: list[str] | None = None,
+    ) -> KnowledgeBaseStats:
+        """聚合文档/切片总数与最近入库时间。
+
+        admin 视角传 None 表示不限；普通用户传合并后的有效标签。
+        三条统计 SQL 共用同一套 `_permission_where`，保证可见范围一致。
+        """
+        document_count = await self.repo.count(permission_tags=permission_tags)
+        chunk_count = await self.chunk_repo.count_visible(
+            permission_tags=permission_tags
+        )
+        last_indexed_at = await self.repo.get_last_indexed_at(
+            permission_tags=permission_tags
+        )
+        return KnowledgeBaseStats(
+            document_count=document_count,
+            chunk_count=chunk_count,
+            last_indexed_at=last_indexed_at,
         )
 
     async def delete(self, document_id: UUID) -> None:

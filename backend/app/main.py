@@ -12,11 +12,17 @@ from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.core.observability import configure_observability
 from app.db.seed import seed_default_admin
+from app.mcp_server import knowledge_mcp
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """应用生命周期钩子：启动时做种子初始化。"""
+    """应用生命周期钩子：种子初始化 + FastMCP session_manager。
+
+    mcp.session_manager.run() 是 FastMCP streamable HTTP 必备的后台任务组；
+    不启动时工具调用会因缺少 ASGI scope 抛 RuntimeError。绑到 lifespan
+    可在应用退出时干净关闭。
+    """
     logger = get_logger(__name__)
     if not settings.jwt_secret:
         # 教学场景刻意不阻断启动，但提示学员补配
@@ -25,7 +31,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await seed_default_admin()
     except Exception:
         logger.exception("种子初始化失败：后续可重新启动重试")
-    yield
+    async with knowledge_mcp.session_manager.run():
+        yield
 
 
 def create_app() -> FastAPI:
@@ -56,6 +63,10 @@ def create_app() -> FastAPI:
     app.include_router(documents.router, prefix="/api")
     app.include_router(chat.router, prefix="/api")
     app.include_router(evaluations.router, prefix="/api")
+
+    # MCP Server 同进程挂载到 /mcp：Streamable HTTP 供外部 Agent 调用，
+    # 鉴权重用 Authorization: Bearer JWT。
+    app.mount("/mcp", knowledge_mcp.streamable_http_app(), name="mcp")
 
     logger.info("app initialized: %s", settings.app_name)
     return app

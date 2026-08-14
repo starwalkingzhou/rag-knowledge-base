@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -73,6 +74,32 @@ class DocumentRepository:
         items = (await self.session.execute(items_stmt)).scalars().all()
         total = (await self.session.execute(count_stmt)).scalar_one()
         return list(items), int(total)
+
+    async def count(
+        self, *, permission_tags: list[str] | None = None
+    ) -> int:
+        """统计可见文档总数。MCP `get_knowledge_base_stats` 用。"""
+        stmt = select(func.count()).select_from(Document)
+        perm_where = _permission_where(permission_tags)
+        if perm_where is not None:
+            stmt = stmt.where(perm_where)
+        return int((await self.session.execute(stmt)).scalar_one())
+
+    async def get_last_indexed_at(
+        self, *, permission_tags: list[str] | None = None
+    ) -> datetime | None:
+        """最近一次进入 `ready` 状态的文档时间。
+
+        用 `updated_at` 而非 `created_at`: reindex 成功后 `updated_at` 会刷新，
+        外部 Agent 看到的「最近一次入库」含义里包含增量重建。
+        """
+        stmt = select(func.max(Document.updated_at)).where(
+            Document.status == DocumentStatus.READY
+        )
+        perm_where = _permission_where(permission_tags)
+        if perm_where is not None:
+            stmt = stmt.where(perm_where)
+        return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def delete(self, document: Document) -> None:
         "“删除文档。chunks 走 ORM级联删除(Document.chunks 配了 delete-orphan)。"""

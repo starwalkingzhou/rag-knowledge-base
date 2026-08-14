@@ -66,6 +66,21 @@ class EvaluationAnswer:
     citations: list[dict] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class MCPChatAnswer:
+    """MCP `ask_knowledge_base` 工具的非流式问答结果。
+
+    与评测路径不同的是：MCP 调用方是真实用户（持 JWT），需要按其权限标签
+    过滤检索结果；与 stream_answer 不同的是：不创建 conversation、不写
+    user / assistant 消息，外部 Agent 自己管多轮上下文。
+    """
+
+    answer: str
+    refused: bool
+    citations: list[dict]
+    trace_id: str | None
+
+
 def _build_retrieval_meta(chunk: RetrievedChunk) -> dict:
     """混合检索调试元数据"""
     return {
@@ -246,6 +261,71 @@ class ChatService:
                 first_token_latency_ms=None,
                 error_message=str(exc).strip() or exc.__class__.__name__,
             )
+
+    @traceable(name="ChatService.answer_for_mcp", run_type="chain")
+    async def answer_for_mcp(
+        self, question: str, *, current_user: User
+    ) -> MCPChatAnswer:
+        """MCP `ask_knowledge_base` 工具入口：跑一遍完整 RAG 拿非流式结果。
+
+        与 stream_answer 区别：
+        - 不创建 conversation，不落 user/assistant 消息（MCP 调用不污染聊天历史）
+        - chat_history 强制空
+        - 把流式 token 聚合成完整 answer 后再做 verify_answer 校验
+        - 异常直接抛出，由工具层翻译成 ToolError 给 Agent
+
+        与 answer_for_evaluation 区别：
+        - 使用真实用户身份做 permission_tags 过滤
+        - 不记录 latency / error_message 指标
+        """
+        permissions = compute_user_permission_tags(current_user)
+        trace_id = get_current_trace_id()
+        state: RAGState = {
+            "conversation_id": UUID(int=0),  # 占位，不写库
+            "question": question,
+            "chat_history": [],
+            "permissions": permissions,
+            "trace_id": trace_id,
+        }
+
+        final_state = await get_rag_graph().ainvoke(state)
+        state.update(final_state)  # type: ignore[arg-type]
+
+        if state.get("refused"):
+            answer = state["answer"]
+        else:
+            parts: list[str] = []
+            async for delta in stream_generate(state):
+                parts.append(delta)
+            answer = "".join(parts)
+            state["answer"] = answer
+
+            if settings.verify_answer_enabled:
+                verify_result = await get_answer_verifier().verify(
+                    question=question,
+                    answer=answer,
+                    chunks=list(state.get("retrieved_chunks", [])),
+                )
+                if not verify_result.verified:
+                    answer = REFUSAL_ANSWER
+                    state["answer"] = answer
+                    state["refused"] = True
+
+        refused = bool(state.get("refused"))
+        citations = (
+            []
+            if refused
+            else [
+                _serialize_citation(c, ordinal=i)
+                for i, c in enumerate(state.get("retrieved_chunks", []), 1)
+            ]
+        )
+        return MCPChatAnswer(
+            answer=answer,
+            refused=refused,
+            citations=citations,
+            trace_id=trace_id,
+        )
 
     # 注意缩进,这些都是 ChatService 类里的函数
     @traceable(name="ChatService.stream_answer", run_type="chain")
